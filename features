@@ -1,0 +1,13 @@
+Features:
+    Basic Autoclicker features
+    Can find target even when it moved
+    Can type
+    Can take input that’s in human language
+    Takes complete control of machine
+
+Program files needed:
+    Basic Autoclicker
+    Parser
+    Computer Vision
+    GUI
+    Main logic file
