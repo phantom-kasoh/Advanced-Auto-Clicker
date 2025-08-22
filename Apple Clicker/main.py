@@ -2,100 +2,129 @@ import tkinter as tk
 import random
 import csv
 
-# Window setup
+# ---------------- Window Setup ----------------
 root = tk.Tk()
-root.title("Apple Clicker")
-root.geometry("600x400")
-root.resizable(True, True)  # Make window resizable
+root.title("Text Clicker")
+root.geometry("800x500")
+root.resizable(True, True)
 
-# Create canvas with initial size
 canvas = tk.Canvas(root, bg="white")
-canvas.pack(fill=tk.BOTH, expand=True)  # Canvas fills window
+canvas.pack(fill=tk.BOTH, expand=True)
 
-# Store history
-apple_positions = []   # stores (x, y, left, right, top, bottom)
-click_positions = []   # stores (x, y, hit/miss)
+# ---------------- Words ----------------
+WORDS = [
+    ("Apple", "Fruit"),
+    ("Banana", "Fruit"),
+    ("Cat", "Animal"),
+    ("Dog", "Animal"),
+    ("Carrot", "Vegetable"),
+    ("Elephant", "Animal"),
+    ("Orange", "Fruit"),
+    ("Broccoli", "Vegetable")
+]
 
-APPLE_SIZE = 30
-current_bounds = None  # keep track of active apple bounds
+NUM_WORDS = 6
+active_words = []  # [text, category, x, y, dx, dy, canvas_id]
+click_positions = []  # (word, category, hit)
+moving = False
 
-def spawn_apple():
-    """Spawn apple at random position on canvas"""
-    global current_bounds
-    canvas.delete("apple")
+# ---------------- Functions ----------------
+def spawn_words():
+    """Spawn moving words at random positions without overlap"""
+    global active_words
+    canvas.delete("word")
+    active_words = []
 
-    # Get current canvas dimensions
+    canvas.update_idletasks()  # ensure correct canvas size
+    canvas_width = max(canvas.winfo_width(), 200)
+    canvas_height = max(canvas.winfo_height(), 100)
+
+    positions = []
+
+    for _ in range(NUM_WORDS):
+        text, category = random.choice(WORDS)
+
+        # Avoid overlapping positions
+        for _ in range(100):  # max attempts
+            x = random.randint(50, canvas_width - 50)
+            y = random.randint(50, canvas_height - 50)
+            if all(abs(x - px) > 50 and abs(y - py) > 30 for px, py in positions):
+                positions.append((x, y))
+                break
+
+        dx, dy = random.choice([-3, 3]), random.choice([-3, 3])
+        cid = canvas.create_text(
+            x, y, text=text, font=("Arial", 16, "bold"),
+            fill=random.choice(["red", "blue", "green", "purple"]),
+            tags="word"
+        )
+
+        active_words.append([text, category, x, y, dx, dy, cid])
+
+def move_words():
+    """Animate words around the canvas"""
+    if not moving:
+        return
+
     canvas_width = canvas.winfo_width()
     canvas_height = canvas.winfo_height()
 
-    # Ensure minimum dimensions to prevent negative values
-    canvas_width = max(canvas_width, APPLE_SIZE)
-    canvas_height = max(canvas_height, APPLE_SIZE)
+    for word in active_words:
+        text, category, x, y, dx, dy, cid = word
 
-    x = random.randint(0, canvas_width - APPLE_SIZE)
-    y = random.randint(0, canvas_height - APPLE_SIZE)
+        x += dx
+        y += dy
 
-    left = x
-    right = x + APPLE_SIZE
-    top = y
-    bottom = y + APPLE_SIZE
+        # Simple bounding box for bouncing (approx 50x20)
+        if x <= 0 or x >= canvas_width:
+            dx *= -1
+        if y <= 0 or y >= canvas_height:
+            dy *= -1
 
-    current_bounds = (left, right, top, bottom)
-    apple_positions.append((x, y, left, right, top, bottom))
+        word[2], word[3], word[4], word[5] = x, y, dx, dy
+        canvas.coords(cid, x, y)
 
-    # Draw apple as red circle
-    canvas.create_oval(left, top, right, bottom,
-                      fill="red", outline="black", tags="apple")
+    root.after(30, move_words)
 
-    print(f"Apple spawned → Left: {left}, Right: {right}, Top: {top}, Bottom: {bottom}")
+def toggle_movement():
+    global moving
+    moving = not moving
+    if moving:
+        move_button.config(text="Stop Moving")
+        move_words()
+    else:
+        move_button.config(text="Start Moving")
 
 def on_click(event):
-    """Record clicks, check if apple clicked, respawn apple"""
-    global current_bounds
-    left, right, top, bottom = current_bounds
-    hit = left <= event.x <= right and top <= event.y <= bottom
-    click_positions.append((event.x, event.y, hit))
-
-    if hit:
-        print(f"Click at ({event.x}, {event.y}) → ✅ HIT the apple!")
-    else:
+    """Check if a word was clicked"""
+    hit_any = False
+    for word in active_words:
+        text, category, x, y, dx, dy, cid = word
+        bbox = canvas.bbox(cid)  # bounding box of text
+        if bbox[0] <= event.x <= bbox[2] and bbox[1] <= event.y <= bbox[3]:
+            print(f"Click at ({event.x}, {event.y}) → ✅ HIT '{text}' ({category})")
+            click_positions.append((text, category, True))
+            hit_any = True
+            break
+    if not hit_any:
         print(f"Click at ({event.x}, {event.y}) → ❌ MISS")
-
-    spawn_apple()
-
-def toggle_fullscreen(event=None):
-    """Toggle between fullscreen and windowed mode"""
-    root.attributes("-fullscreen", not root.attributes("-fullscreen"))
-    if not root.attributes("-fullscreen"):
-        root.geometry("600x400")  # Restore default size when exiting fullscreen
-    spawn_apple()  # Respawn apple to ensure it fits new window size
-
-# Bind click and fullscreen toggle
-canvas.bind("<Button-1>", on_click)
-root.bind("<F>", toggle_fullscreen)
-
-# Handle window resize
-def on_resize(event):
-    """Respawn apple when window is resized"""
-    spawn_apple()
-
-canvas.bind("<Configure>", on_resize)
-
-# First apple
-spawn_apple()
+        click_positions.append(("", "", False))
 
 def on_close():
-    """Save all data to CSV on close"""
-    with open("apple_click_data.csv", "w", newline="") as f:
+    """Save click data to CSV"""
+    with open("text_click_data.csv", "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["Type", "X", "Y", "Left", "Right", "Top", "Bottom", "Hit"])
-        for (x, y, left, right, top, bottom) in apple_positions:
-            writer.writerow(["Apple", x, y, left, right, top, bottom, ""])
-        for (x, y, hit) in click_positions:
-            writer.writerow(["Click", x, y, "", "", "", "", hit])
-
-    print("Data saved to apple_click_data.csv")
+        writer.writerow(["Word", "Category", "Hit"])
+        for row in click_positions:
+            writer.writerow(row)
+    print("Data saved to text_click_data.csv")
     root.destroy()
 
+# ---------------- UI Bindings ----------------
+canvas.bind("<Button-1>", on_click)
+move_button = tk.Button(root, text="Start Moving", command=toggle_movement)
+move_button.pack()
+
+spawn_words()
 root.protocol("WM_DELETE_WINDOW", on_close)
 root.mainloop()

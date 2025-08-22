@@ -1,12 +1,9 @@
-# requirements: pip install opencv-python mss pywin32 numpy requests
-
 import cv2
 import numpy as np
 import mss
 import win32api, win32con, win32gui, win32ui
 import ctypes
 import time
-import requests
 import threading
 
 # ---------- Enable DPI awareness ----------
@@ -76,7 +73,7 @@ class Overlay:
 
 
 # ---------- Target detection ----------
-def find_red_center(frame_bgr):
+def find_red_centers(frame_bgr):
     hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
     lower1 = np.array([0, 120, 120], np.uint8)
     upper1 = np.array([10, 255, 255], np.uint8)
@@ -88,13 +85,13 @@ def find_red_center(frame_bgr):
     mask = cv2.dilate(mask, kernel, iterations=1)
 
     cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not cnts:
-        return None
-    c = max(cnts, key=cv2.contourArea)
-    if cv2.contourArea(c) < 8:
-        return None
-    x, y, w, h = cv2.boundingRect(c)
-    return x + w // 2, y + h // 2
+    centers = []
+    for c in cnts:
+        if cv2.contourArea(c) < 8:
+            continue
+        x, y, w, h = cv2.boundingRect(c)
+        centers.append((x + w // 2, y + h // 2))
+    return centers
 
 
 # ---------- Main loop for one monitor ----------
@@ -102,7 +99,8 @@ def run_on_monitor(monitor, radius=6, smooth=0.35, max_fps=60):
     overlay = Overlay(monitor)
     sct = mss.mss()
 
-    sx, sy = None, None
+    smoothed = []  # list of [x, y]
+
     min_dt = 1.0 / max_fps
     t_prev = 0.0
 
@@ -120,19 +118,42 @@ def run_on_monitor(monitor, radius=6, smooth=0.35, max_fps=60):
         # Capture
         img = np.array(sct.grab(monitor))
         frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-        cen = find_red_center(frame)
+        centers = find_red_centers(frame)
 
         overlay.clear()
-        if cen:
-            cx, cy = cen
-            if sx is None:
-                sx, sy = cx, cy
-            else:
-                sx = (1 - smooth) * sx + smooth * cx
-                sy = (1 - smooth) * sy + smooth * cy
-            overlay.draw_dot(int(sx), int(sy), radius=radius, color=(0, 0, 0))
+
+        if centers:
+            new_smoothed = []
+
+            # Copy old smoothed points so we can match
+            unmatched_old = smoothed[:]
+
+            for cx, cy in centers:
+                match = None
+                best_dist = 50  # max distance to consider same target
+                for old in unmatched_old:
+                    dist = (old[0] - cx) ** 2 + (old[1] - cy) ** 2
+                    if dist < best_dist ** 2:
+                        best_dist = dist ** 0.5
+                        match = old
+
+                if match is not None:
+                    # Smooth movement
+                    nx = (1 - smooth) * match[0] + smooth * cx
+                    ny = (1 - smooth) * match[1] + smooth * cy
+                    new_smoothed.append([nx, ny])
+                    unmatched_old.remove(match)
+                else:
+                    # New dot
+                    new_smoothed.append([cx, cy])
+
+            smoothed = new_smoothed
+
+            # Draw each smoothed dot
+            for sx, sy in smoothed:
+                overlay.draw_dot(int(sx), int(sy), radius=radius, color=(0, 0, 0))
         else:
-            sx, sy = None, None
+            smoothed = []
 
         win32gui.UpdateWindow(overlay.hwnd)
 
