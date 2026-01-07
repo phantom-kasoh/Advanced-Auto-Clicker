@@ -122,8 +122,12 @@ class YoloV1Loss(tf.keras.losses.Loss):
         obj_loss = tf.reduce_sum(obj_mask * tf.square(true_boxes[..., 4:5] - pred_boxes[..., 4:5]))
         noobj_loss = self.lambda_noobj * tf.reduce_sum(noobj_mask * tf.square(0.0 - pred_boxes[..., 4:5]))
 
-        # Class loss (softmax cross entropy per cell — assume target is one-hot placed in each cell that has an object)
-        cls_loss = tf.reduce_sum(obj_mask[..., 0:1] * tf.reduce_sum(tf.square(true_cls - pred_cls), axis=-1, keepdims=True))
+        # Per-cell objectness mask (reduce over B): shape (batch, S, S, 1)
+        obj_cell = tf.reduce_max(obj_mask, axis=3)  # (b,S,S,1)
+
+        # Class loss only where there is an object in the cell
+        cls_err = tf.reduce_sum(tf.square(true_cls - pred_cls), axis=-1, keepdims=True)  # (b,S,S,1)
+        cls_loss = tf.reduce_sum(obj_cell * cls_err)
 
         total = coord_loss + obj_loss + noobj_loss + cls_loss
         return total

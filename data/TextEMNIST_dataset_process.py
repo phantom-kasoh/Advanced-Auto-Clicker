@@ -5,7 +5,7 @@ from scipy.io import loadmat
 from sklearn.model_selection import train_test_split
 
 # Load EMNIST ByClass
-mat = loadmat(r"C:\Users\phant\Downloads\matlab\emnist-byclass.mat")
+mat = loadmat(r"C:\Users\msolorzano52.HACKTHEGIBSON\Downloads\matlab\matlab\emnist-byclass.mat")
 
 # Training data
 X_train = mat['dataset']['train'][0,0]['images'][0,0]      # flattened images
