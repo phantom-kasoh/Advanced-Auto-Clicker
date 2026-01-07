@@ -90,6 +90,7 @@ def find_red_centers(frame_bgr):
         if cv2.contourArea(c) < 8:
             continue
         x, y, w, h = cv2.boundingRect(c)
+        print(f"x: {x} \ny: {y} \nw: {w}\nh: {h}")
         centers.append((x + w // 2, y + h // 2))
     return centers
 

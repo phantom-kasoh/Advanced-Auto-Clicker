@@ -40,3 +40,4 @@ def get_all_corners(monitor_info):
 all_monitors_info = []
 for m in get_monitors_info():
     all_monitors_info.append(get_all_corners(m))
+print(all_monitors_info)
