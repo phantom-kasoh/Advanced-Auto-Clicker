@@ -425,16 +425,67 @@ def main():
     det = OneAnnDetector(classes, S=args.S, B=args.B)
     det.compile(lr=args.lr)
 
-    ckpt = tf.keras.callbacks.ModelCheckpoint(
-        args.weights_out,
+    det = OneAnnDetector(classes, S=args.S, B=args.B)
+    det.compile(lr=args.lr)
+
+    models_dir = os.path.dirname(os.path.abspath(args.weights_out)) or "."
+    os.makedirs(models_dir, exist_ok=True)
+
+    best_path = args.weights_out  # keep your CLI arg as the "best" file
+    latest_epoch_path = os.path.join(models_dir, "latest_epoch.weights.h5")
+    latest_step_path = os.path.join(models_dir, "latest_step.weights.h5")
+    log_path = os.path.join(models_dir, "train_log.csv")
+
+    # --- Auto-resume (newest first) ---
+    for p in (latest_step_path, latest_epoch_path, best_path):
+        if os.path.exists(p):
+            det.model.load_weights(p)
+            print(f"[RESUME] Loaded weights from: {p}")
+            break
+
+    callbacks = []
+
+    # --- Crash-safe resume (includes optimizer state) if your TF has it ---
+    if hasattr(tf.keras.callbacks, "BackupAndRestore"):
+        callbacks.append(tf.keras.callbacks.BackupAndRestore(
+            backup_dir=os.path.join(models_dir, "backup_state")
+        ))
+
+    # --- Always save latest (epoch) ---
+    callbacks.append(tf.keras.callbacks.ModelCheckpoint(
+        latest_epoch_path,
+        save_weights_only=True,
+        save_best_only=False,
+        save_freq="epoch",
+        verbose=0,
+    ))
+
+    # --- Save latest periodically inside the epoch (so a crash costs minutes, not an epoch) ---
+    save_every_batches = max(50, args.steps // 4)  # tweak if you want
+    callbacks.append(tf.keras.callbacks.ModelCheckpoint(
+        latest_step_path,
+        save_weights_only=True,
+        save_best_only=False,
+        save_freq=save_every_batches,
+        verbose=0,
+    ))
+
+    # --- Save best (what you already had) ---
+    callbacks.append(tf.keras.callbacks.ModelCheckpoint(
+        best_path,
         save_weights_only=True,
         monitor="loss",
         save_best_only=True,
         verbose=1,
-    )
+    ))
+
+    callbacks.append(tf.keras.callbacks.CSVLogger(log_path, append=True))
+    callbacks.append(tf.keras.callbacks.TerminateOnNaN())
+
     lr_sched = tf.keras.callbacks.ReduceLROnPlateau(
         monitor="loss", factor=0.5, patience=3, verbose=1
     )
+    callbacks.append(lr_sched)
 
     total_done = 0
     for (e, mn, mx) in phases:
@@ -454,12 +505,17 @@ def main():
             probs=(args.p_colors, args.p_shapes, args.p_text),
             blank_prob=args.blank_prob,
         )
-        det.model.fit(
-            train_ds_phase,
-            epochs=e,
-            callbacks=[ckpt, lr_sched],
-            verbose=1,
-        )
+        try:
+            det.model.fit(
+                train_ds_phase,
+                epochs=e,
+                callbacks=callbacks,
+                verbose=1,
+            )
+        except KeyboardInterrupt:
+            print("[INTERRUPT] Saving latest weights before exiting...")
+            det.save(latest_epoch_path)
+            raise
 
     det.save(args.weights_out)
     print(f"[OK] Saved weights: {args.weights_out}")
