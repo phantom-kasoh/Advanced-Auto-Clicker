@@ -291,9 +291,26 @@ class OneAnnDetector:
     def save(self, weights_path: str):
         self.model.save_weights(weights_path)
 
-    def compile(self, lr=1e-3):
+    def compile(self, lr=1e-3, clipnorm: float = 1.0, jit_compile: bool = False):
+        """Compile the model with sensible defaults.
+
+        clipnorm:
+            Gradient clipping for stability. Set 0 or None to disable.
+        jit_compile:
+            If True, asks TF/XLA to JIT compile the training step (best-effort).
+        """
         self.loss_fn = YoloV1Loss(self.S, self.B, self.C)
-        self.model.compile(optimizer=tf.keras.optimizers.Adam(lr), loss=self.loss_fn)
+
+        if clipnorm and clipnorm > 0:
+            opt = tf.keras.optimizers.Adam(learning_rate=lr, clipnorm=clipnorm)
+        else:
+            opt = tf.keras.optimizers.Adam(learning_rate=lr)
+
+        # jit_compile is supported on modern TF; if unsupported it is ignored by older versions.
+        try:
+            self.model.compile(optimizer=opt, loss=self.loss_fn, jit_compile=jit_compile)
+        except TypeError:
+            self.model.compile(optimizer=opt, loss=self.loss_fn)
 
     def train(self, images_dir: str, labels_dir: str, epochs=50, batch_size=8):
         ds = YoloDataset(images_dir, labels_dir, self.classes, S=self.S, B=self.B, batch_size=batch_size)
